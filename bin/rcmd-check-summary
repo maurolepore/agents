@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# rcmd-check-summary: print token-cheap summary of an R CMD check run.
+# Prefers the parsed sibling .rds (same path, .rds extension); falls back to
+# grepping the log for older runs that have no .rds.
+# Usage: rcmd-check-summary [logfile]
+# If no logfile given, uses the most recent /tmp/rcmd-check-*.log.
+set -u
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  echo "Usage: rcmd-check-summary [logfile]"
+  echo "Prints Status, failing checks, and log path. Full log stays on disk."
+  exit 0
+fi
+
+LOG="${1:-}"
+if [[ -z "$LOG" ]]; then
+  # most recent log, or fail with hint
+  LOG=$(ls -t /tmp/rcmd-check-*.log 2>/dev/null | head -n1)
+  if [[ -z "${LOG:-}" ]]; then
+    echo "[rcmd-check-summary] No log file found. Run: rcmd-check [pkgdir]" >&2
+    exit 1
+  fi
+fi
+
+if [[ ! -f "$LOG" ]]; then
+  echo "[rcmd-check-summary] Not found: $LOG" >&2
+  exit 1
+fi
+
+RDS="${LOG%.log}.rds"
+if [[ -f "$RDS" ]]; then
+  # Log path travels via argv so no shell value is interpolated into R code.
+  Rscript --vanilla -e '
+args <- commandArgs(trailingOnly = TRUE)
+out <- readRDS(args[[1L]])
+log <- args[[2L]]
+topic <- function(x) strsplit(x, "\n", fixed = TRUE)[[1L]][1L]
+ne <- length(out$errors); nw <- length(out$warnings); nn <- length(out$notes)
+plural <- function(n, what) if (n == 1L) paste(n, what) else paste(n, paste0(what, "s"))
+if (ne + nw + nn == 0L) {
+  cat("Status: OK\n")
+} else {
+  parts <- c(if (ne > 0L) plural(ne, "ERROR"), if (nw > 0L) plural(nw, "WARNING"), if (nn > 0L) plural(nn, "NOTE"))
+  cat("Status: ", paste(parts, collapse = ", "), "\n", sep = "")
+  for (e in out$errors) cat("[ERROR] ", topic(e), "\n", sep = "")
+  for (w in out$warnings) cat("[WARNING] ", topic(w), "\n", sep = "")
+  for (n in out$notes) cat("[NOTE] ", topic(n), "\n", sep = "")
+  cat("Full log: ", log, "\n", sep = "")
+}
+' "$RDS" "$LOG"
+  exit 0
+fi
+
+# Legacy path: logs from before the .rds era. Scrape the text.
+# 1. R CMD check Status line (the verdict). Present in both
+#    devtools::check and R CMD check output.
+grep -E "^Status:" "$LOG" || true
+
+# 2. Failing checks only (keeps output small on success).
+grep -E "checking.*(WARNING|NOTE|ERROR)" "$LOG" | grep -v "OK" || true
+
+# 3. rcmdcheck/devtools error summary block, if present.
+grep -E "^── .* (failure|warning|note)|^[0-9]+ (error|warning|note)" "$LOG" | head -n 20 || true
+
+# Clean check: verdict above is the whole story, skip the all-OK tail.
+if grep -qE "^Status: OK$" "$LOG"; then
+  echo "Full log: $LOG"
+  exit 0
+fi
+
+echo "--- tail ---"
+tail -n 20 "$LOG"
+echo "---"
+echo "Full log: $LOG"
+echo "Drill in: grep -E 'ERROR|WARNING|NOTE' $LOG"

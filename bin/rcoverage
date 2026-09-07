@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# rcoverage: run package coverage without flooding the calling session.
+# Full output to a log file; parsed per-expression data to a sibling .rds.
+# Summary (total + files below 100%) to stdout; log path only on failure.
+# Coverage is meaningless on a failing suite, so when tests fail no coverage
+# is reported -- run rtest first and fix failures instead.
+# Usage: rcoverage [pkgdir] [--log PATH]
+set -u
+
+PKG="."
+LOG=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      echo "Usage: rcoverage [pkgdir] [--log PATH]"
+      echo "Summary to stdout; full log + parsed .rds next to the log path."
+      exit 0
+      ;;
+    --log)
+      if [[ -n "${2:-}" ]]; then
+        LOG="$2"
+        shift 2
+      else
+        shift
+      fi
+      ;;
+    *)
+      PKG="$1"
+      shift
+      ;;
+  esac
+done
+
+NAME=$(basename "$(cd "$PKG" 2>/dev/null && pwd -P || echo "$PKG")")
+if [[ -z "${LOG:-}" ]]; then
+  LOG="/tmp/rcoverage-${NAME}-$(date +%Y%m%d-%H%M%S).log"
+fi
+RDS="${LOG%.log}.rds"
+
+echo "[rcoverage] pkg: $PKG"
+
+# Values travel via environment so no shell value is interpolated into R code.
+RCOV_PKG="$PKG" RCOV_LOG="$LOG" RCOV_RDS="$RDS" Rscript --vanilla - <<'R_EOF' >"$LOG" 2>&1
+pkg <- Sys.getenv("RCOV_PKG")
+log <- Sys.getenv("RCOV_LOG")
+rds <- Sys.getenv("RCOV_RDS")
+res <- tryCatch(covr::package_coverage(pkg, quiet = FALSE), error = function(e) e)
+if (inherits(res, "error")) {
+  saveRDS(NULL, rds)
+  quit(save = "no", status = 1L)
+}
+saveRDS(as.data.frame(res), rds)
+quit(save = "no", status = 0L)
+R_EOF
+CODE=$?
+
+rcoverage-summary "$LOG"
+exit "$CODE"

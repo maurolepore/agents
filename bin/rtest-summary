@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# rtest-summary: print token-cheap summary of a test run.
+# Prefers the parsed sibling .rds (same path, .rds extension); falls back to
+# grepping the log for older runs that have no .rds.
+# Usage: rtest-summary [logfile]
+# If no logfile given, uses the most recent /tmp/rtest-*.log.
+set -u
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  echo "Usage: rtest-summary [logfile]"
+  echo "Prints counts and failing tests. Full log stays on disk."
+  exit 0
+fi
+
+LOG="${1:-}"
+if [[ -z "$LOG" ]]; then
+  # most recent log, or fail with hint
+  LOG=$(ls -t /tmp/rtest-*.log 2>/dev/null | head -n1)
+  if [[ -z "${LOG:-}" ]]; then
+    echo "[rtest-summary] No log file found. Run: rtest [pkgdir]" >&2
+    exit 1
+  fi
+fi
+
+if [[ ! -f "$LOG" ]]; then
+  echo "[rtest-summary] Not found: $LOG" >&2
+  exit 1
+fi
+
+RDS="${LOG%.log}.rds"
+if [[ -f "$RDS" ]]; then
+  # Log path travels via argv so no shell value is interpolated into R code.
+  Rscript --vanilla -e '
+args <- commandArgs(trailingOnly = TRUE)
+df <- readRDS(args[[1L]])
+log <- args[[2L]]
+n <- nrow(df)
+f <- sum(df$failed)
+e <- sum(df$error)
+s <- sum(df$skipped)
+p <- sum(df$passed)
+cat(n, "tests,", f, "failed,", e, "errors,", s, "skipped,", p, "passed\n", sep = " ")
+bad <- df[df$failed > 0 | df$error, c("file", "test")]
+for (i in seq_len(nrow(bad))) cat("FAIL ", bad$file[[i]], ": ", bad$test[[i]], "\n", sep = "")
+if (f + e > 0L) cat("Full log: ", log, "\n", sep = "")
+' "$RDS" "$LOG"
+  exit 0
+fi
+
+# Legacy path: logs from before the .rds era. Scrape the text.
+grep -E "FAIL.*PASS|Failed tests|Failure" "$LOG" | head -n 20 || true
+if grep -qE "FAIL [1-9]" "$LOG"; then
+  echo "Full log: $LOG"
+fi

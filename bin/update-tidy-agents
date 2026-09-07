@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# update-tidy-agents: restore token-cheap command routing after usethis::use_tidy_agents().
+# Rewrites the Key commands section of <pkgdir>/AGENTS.md with the canonical block
+# (wrappers in ~/git/agents/bin). Idempotent: exits quietly when already patched.
+# Aborts if the section lacks known anchors (template drifted -- inspect by hand).
+# Also ensures the durability pointer in the preserved "This package" section.
+# Usage: update-tidy-agents [pkgdir]
+set -u
+
+PKG="${1:-.}"
+if [[ "$PKG" == "-h" || "$PKG" == "--help" ]]; then
+  echo "Usage: update-tidy-agents [pkgdir]"
+  exit 0
+fi
+
+FILE="$PKG/AGENTS.md"
+if [[ ! -f "$FILE" ]]; then
+  echo "[update-tidy-agents] Not found: $FILE" >&2
+  exit 1
+fi
+
+python3 - "$FILE" <<'PY_EOF'
+import sys
+
+path = sys.argv[1]
+text = open(path).read()
+
+MARKER = "<!-- update-tidy-agents: managed block, do not edit by hand -->"
+POINTER = "After `usethis::use_tidy_agents()`, run `update-tidy-agents` to restore token-cheap command routing."
+
+CANONICAL = """### Key commands
+<!-- update-tidy-agents: managed block, do not edit by hand -->
+
+Shell wrappers (`rtest`, `rcoverage`, `rcmd-check`) print
+summaries only; full output goes to log files. Requires `~/git/agents/bin` on PATH.
+When a wrapper reports success, stop here --
+never cat, tail, or read the full log. Drill in only on failure.
+
+```R
+# Executing code
+devtools::load_all()
+code
+
+# Single test (small output, safe direct)
+devtools::test_active_file("R/{name}.R") # tests for R/{name}.R
+devtools::test_active_file("R/{name}.R", desc = 'blah') # single test with exact description "blah" (no regexp)
+
+# Documentation
+devtools::document() # redocument package
+pkgdown::check_pkgdown() # check website
+```
+
+```sh
+# Tests (never devtools::test() in agent sessions)
+rtest # all tests: counts + failures only, drill in with rtest-summary <logfile>
+rtest --filter "^{name}" # tests for files starting with {name}
+
+# Coverage (never devtools::test_coverage() in agent sessions)
+rcoverage # total + files below 100% only
+
+# R CMD check (never devtools::check() in agent sessions)
+rcmd-check # Status + failing checks only, drill in with rcmd-check-summary <logfile>
+```"""
+
+if MARKER in text:
+    print("already patched; nothing to do")
+else:
+    lines = text.split("\n")
+    try:
+        start = next(i for i, l in enumerate(lines) if l.strip() == "### Key commands")
+        end = next(i for i, l in enumerate(lines) if i > start and l.startswith("### "))
+    except StopIteration:
+        print("Key commands section not found; aborting", file=sys.stderr)
+        sys.exit(1)
+    section = "\n".join(lines[start:end])
+    for anchor in ("devtools::test()", "devtools::check()"):
+        if anchor not in section:
+            print(f"anchor {anchor!r} missing; template drifted, aborting", file=sys.stderr)
+            sys.exit(1)
+    text = "\n".join(lines[:start]).rstrip("\n") + "\n\n" + CANONICAL + "\n\n" + "\n".join(lines[end:]).lstrip("\n")
+    open(path, "w").write(text)
+    print("patched Key commands")
+
+if POINTER not in text:
+    placeholder = "<!-- Insert package-specific content here. use_tidy_agents() will preserve this section when updating the rest of the file. -->"
+    if placeholder in text:
+        text = open(path).read()
+        text = text.replace(placeholder, placeholder + "\n\n" + POINTER, 1)
+        open(path, "w").write(text)
+        print("added durability pointer")
+    else:
+        print("placeholder missing; pointer not added", file=sys.stderr)
+else:
+    print("pointer already present")
+PY_EOF

@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# rtest: run testthat tests without flooding the calling session.
+# Full output to a log file; parsed per-test results to a sibling .rds.
+# Summary (counts + failing tests) to stdout; log path only on failure.
+# Usage: rtest [pkgdir] [--filter REGEX] [--log PATH]
+# Examples:
+#   rtest                       # all tests in .
+#   rtest --filter "^{name}"    # tests for files starting with {name}
+#   rtest R/pkg --log ./t.log
+set -u
+
+PKG="."
+FILTER=""
+LOG=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      echo "Usage: rtest [pkgdir] [--filter REGEX] [--log PATH]"
+      echo "Summary to stdout; full log + parsed .rds next to the log path."
+      exit 0
+      ;;
+    --filter)
+      if [[ -n "${2:-}" ]]; then
+        FILTER="$2"
+        shift 2
+      else
+        shift
+      fi
+      ;;
+    --log)
+      if [[ -n "${2:-}" ]]; then
+        LOG="$2"
+        shift 2
+      else
+        shift
+      fi
+      ;;
+    *)
+      PKG="$1"
+      shift
+      ;;
+  esac
+done
+
+NAME=$(basename "$(cd "$PKG" 2>/dev/null && pwd -P || echo "$PKG")")
+if [[ -z "${LOG:-}" ]]; then
+  LOG="/tmp/rtest-${NAME}-$(date +%Y%m%d-%H%M%S).log"
+fi
+RDS="${LOG%.log}.rds"
+
+echo "[rtest] pkg: $PKG"
+
+# Values travel via environment so no shell value is interpolated into R code.
+RTEST_PKG="$PKG" RTEST_FILTER="$FILTER" RTEST_LOG="$LOG" RTEST_RDS="$RDS" Rscript --vanilla - <<'R_EOF' >"$LOG" 2>&1
+pkg <- Sys.getenv("RTEST_PKG")
+flt <- Sys.getenv("RTEST_FILTER")
+log <- Sys.getenv("RTEST_LOG")
+rds <- Sys.getenv("RTEST_RDS")
+res <- devtools::test(pkg, filter = if (nzchar(flt)) flt, reporter = "summary", stop_on_failure = FALSE)
+df <- as.data.frame(res)
+saveRDS(df, rds)
+bad <- sum(df$failed) + sum(df$error)
+quit(save = "no", status = if (bad > 0L) 1L else 0L)
+R_EOF
+CODE=$?
+
+rtest-summary "$LOG"
+exit "$CODE"

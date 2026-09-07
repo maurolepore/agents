@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# rcmd-check: run R CMD check without flooding the calling session.
+# Drives rcmdcheck::rcmdcheck(quiet = TRUE) and prints a structured summary only.
+# Full output goes to a log file; the parsed result to a sibling .rds.
+# Usage: rcmd-check [pkgdir] [--log PATH]
+# Examples:
+#   rcmd-check                  # check . , log to /tmp/rcmd-check-<pkg>-<ts>.log
+#   rcmd-check R/pkg            # check another dir
+#   rcmd-check --log ./check.log
+set -u
+
+PKG="."
+LOG=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      echo "Usage: rcmd-check [pkgdir] [--log PATH]"
+      echo "Summary to stdout; full log + parsed .rds next to the log path."
+      exit 0
+      ;;
+    --log)
+      if [[ -n "${2:-}" ]]; then
+        LOG="$2"
+        shift 2
+      else
+        shift
+      fi
+      ;;
+    *)
+      PKG="$1"
+      shift
+      ;;
+  esac
+done
+
+NAME=$(basename "$(cd "$PKG" 2>/dev/null && pwd -P || echo "$PKG")")
+if [[ -z "${LOG:-}" ]]; then
+  LOG="/tmp/rcmd-check-${NAME}-$(date +%Y%m%d-%H%M%S).log"
+fi
+RDS="${LOG%.log}.rds"
+
+echo "[rcmd-check] pkg: $PKG"
+
+# Paths travel via environment so no shell value is ever interpolated into R code.
+RCMD_PKG="$PKG" RCMD_LOG="$LOG" RCMD_RDS="$RDS" Rscript --vanilla - <<'R_EOF'
+pkg <- Sys.getenv("RCMD_PKG")
+log <- Sys.getenv("RCMD_LOG")
+rds <- Sys.getenv("RCMD_RDS")
+out <- rcmdcheck::rcmdcheck(path = pkg, quiet = TRUE, args = "--no-manual", error_on = "never")
+writeLines(c(out$stdout, out$stderr), log)
+saveRDS(out, rds)
+failed <- length(out$errors) + length(out$warnings) + length(out$notes)
+quit(save = "no", status = if (failed > 0L) 1L else 0L)
+R_EOF
+CODE=$?
+
+rcmd-check-summary "$LOG"
+exit "$CODE"
