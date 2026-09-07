@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+# setup-opencode: wire ~/git/agents for global opencode discovery.
+# Makes skills/commands in this repo available system-wide via symlinks so
+# opencode discovers them from any project (per https://opencode.ai/docs/skills/ and /docs/commands/).
+# Idempotent; safe to re-run. Moves existing global content into the repo before linking.
+# Usage: setup-opencode [--dry-run] [--help]
+set -u
+
+DRY=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      echo "Usage: setup-opencode [--dry-run]"
+      echo "Wires symlinks so opencode discovers ~/git/agents/{skills,commands} globally."
+      echo "  Global skills:   ~/.config/opencode/skills -> ~/git/agents/skills"
+      echo "                   ~/.agents/skills          -> ~/git/agents/skills"
+      echo "                   ~/.claude/skills          -> ~/git/agents/skills"
+      echo "  Global commands: ~/.config/opencode/commands -> ~/git/agents/commands"
+      echo "  Project-local:   .opencode/skills|commands -> ../skills|../commands (portable fallback)"
+      echo "Moves existing files into the repo before linking; idempotent."
+      exit 0
+      ;;
+    --dry-run)
+      DRY="1"
+      shift
+      ;;
+    *)
+      echo "[setup-opencode] unknown arg: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+SRC_SKILLS="$ROOT/skills"
+SRC_COMMANDS="$ROOT/commands"
+
+log() { echo "[setup-opencode] $*"; }
+dry() { if [[ -n "$DRY" ]]; then echo "  (dry-run) $*"; else eval "$*"; fi; }
+
+ensure_src() {
+  local src="$1"
+  if [[ ! -d "$src" ]]; then
+    log "mkdir -p $src"
+    dry "mkdir -p \"$src\""
+  fi
+}
+
+link_dir() {
+  local src="$1" dst="$2"
+  local parent
+  parent="$(dirname "$dst")"
+
+  if [[ ! -d "$src" ]]; then
+    log "skip $dst — source $src missing"
+    return 0
+  fi
+
+  # Already correct symlink?
+  if [[ -L "$dst" ]]; then
+    local cur
+    cur="$(readlink "$dst")"
+    # Resolve relative vs absolute
+    if [[ "$cur" == "$src" ]] || [[ "$(cd "$(dirname "$dst")" 2>/dev/null && cd "$cur" 2>/dev/null && pwd -P)" == "$(cd "$src" && pwd -P)" ]]; then
+      log "ok $dst -> $src (already linked)"
+      return 0
+    else
+      log "replace stale symlink $dst -> $cur"
+      dry "rm \"$dst\""
+    fi
+  fi
+
+  # Existing real directory — merge its content into src before replacing
+  if [[ -d "$dst" && ! -L "$dst" ]]; then
+    # Empty directory: just remove and symlink
+    if [[ -z "$(ls -A "$dst" 2>/dev/null)" ]]; then
+      log "replace empty dir $dst with symlink -> $src"
+      dry "rmdir \"$dst\""
+    else
+      log "merge $dst into $src then symlink"
+      if [[ -z "$DRY" ]]; then
+        # Move each entry if not already present; preserve .gitkeep handling
+        for p in "$dst"/* "$dst"/.*; do
+          [[ -e "$p" ]] || continue
+          bn="$(basename "$p")"
+          [[ "$bn" == "." || "$bn" == ".." ]] && continue
+          if [[ -e "$src/$bn" ]]; then
+            log "  skip $bn — already in $src"
+          else
+            log "  mv $p -> $src/"
+            mv "$p" "$src/"
+          fi
+        done
+        # Clean up now-empty dir (may contain only .gitkeep remnants)
+        if [[ -z "$(ls -A "$dst" 2>/dev/null)" ]]; then
+          rmdir "$dst" 2>/dev/null || rm -rf "$dst"
+        else
+          # Still has conflicts — keep dir, don't symlink (avoid data loss)
+          log "  WARN $dst still has files after merge — leaving as-is, not symlinking"
+          ls -la "$dst" >&2
+          return 0
+        fi
+      else
+        echo "  (dry-run) would merge $dst into $src"
+        dry "rmdir \"$dst\""
+      fi
+    fi
+  elif [[ -e "$dst" ]]; then
+    log "WARN $dst exists as file — backing up to $dst.bak"
+    dry "mv \"$dst\" \"$dst.bak\""
+  fi
+
+  # Ensure parent exists and create symlink
+  if [[ ! -d "$parent" ]]; then
+    log "mkdir -p $parent"
+    dry "mkdir -p \"$parent\""
+  fi
+  log "link $dst -> $src"
+  dry "ln -s \"$src\" \"$dst\""
+}
+
+ensure_src "$SRC_SKILLS"
+ensure_src "$SRC_COMMANDS"
+
+# Global discovery (system-wide, opencode walks these for every project)
+# Per https://opencode.ai/docs/skills/: Global skills at ~/.config/opencode/skills/*/SKILL.md,
+#   plus compatibility at ~/.claude/skills and ~/.agents/skills (auto-loaded).
+# Per https://opencode.ai/docs/commands/: Global commands at ~/.config/opencode/commands/*.md.
+link_dir "$SRC_SKILLS"   "$HOME/.config/opencode/skills"
+link_dir "$SRC_SKILLS"   "$HOME/.agents/skills"
+link_dir "$SRC_SKILLS"   "$HOME/.claude/skills"
+link_dir "$SRC_COMMANDS" "$HOME/.config/opencode/commands"
+
+# Project-local fallback (makes the repo portable — discovered even without global links)
+mkdir -p "$ROOT/.opencode" 2>/dev/null || true
+# Use relative symlinks inside the repo so the worktree is relocatable
+if [[ ! -L "$ROOT/.opencode/skills" ]]; then
+  if [[ -e "$ROOT/.opencode/skills" ]]; then
+    log "WARN $ROOT/.opencode/skills exists (not a symlink) — skipping"
+  else
+    log "link $ROOT/.opencode/skills -> ../skills (project-local fallback)"
+    dry "ln -s ../skills \"$ROOT/.opencode/skills\""
+  fi
+else
+  log "ok $ROOT/.opencode/skills already linked"
+fi
+if [[ ! -L "$ROOT/.opencode/commands" ]]; then
+  if [[ -e "$ROOT/.opencode/commands" ]]; then
+    log "WARN $ROOT/.opencode/commands exists (not a symlink) — skipping"
+  else
+    log "link $ROOT/.opencode/commands -> ../commands (project-local fallback)"
+    dry "ln -s ../commands \"$ROOT/.opencode/commands\""
+  fi
+else
+  log "ok $ROOT/.opencode/commands already linked"
+fi
+
+# settings/ is not an opencode discovery path (no global equivalent) — leave as repo-local only
+if [[ -d "$ROOT/settings" ]]; then
+  log "note: settings/ has no opencode global path — kept repo-local only"
+fi
+
+log "done — verify:"
+dry "ls -la \"$HOME/.config/opencode/skills\" \"$HOME/.agents/skills\" \"$HOME/.claude/skills\" 2>&1 | head -n 20"
+dry "ls -la \"$HOME/.config/opencode/commands\" 2>&1 | head -n 20"
+dry "ls -la \"$ROOT/.opencode\" 2>&1 | head -n 20"
+if [[ -z "$DRY" ]]; then
+  ls -la "$HOME/.config/opencode/skills" "$HOME/.agents/skills" "$HOME/.claude/skills" 2>&1 | head -n 40 || true
+  ls -la "$HOME/.config/opencode/commands" 2>&1 | head -n 20 || true
+  ls -la "$ROOT/.opencode" 2>&1 | head -n 20 || true
+fi
+log "restart opencode to pick up new skills/commands"
