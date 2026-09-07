@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# setup-opencode: wire ~/git/agents for global opencode discovery.
+# setup-opencode: wire this repo for global opencode discovery.
 # Makes skills/commands in this repo available system-wide via symlinks so
 # opencode discovers them from any project (per https://opencode.ai/docs/skills/ and /docs/commands/).
 # Idempotent; safe to re-run. Moves existing global content into the repo before linking.
@@ -11,11 +11,11 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)
       echo "Usage: setup-opencode [--dry-run]"
-      echo "Wires symlinks so opencode discovers ~/git/agents/{skills,commands} globally."
-      echo "  Global skills:   ~/.config/opencode/skills -> ~/git/agents/skills"
-      echo "                   ~/.agents/skills          -> ~/git/agents/skills"
-      echo "                   ~/.claude/skills          -> ~/git/agents/skills"
-      echo "  Global commands: ~/.config/opencode/commands -> ~/git/agents/commands"
+      echo "Wires symlinks so opencode discovers <repo>/{skills,commands} globally."
+      echo "  Global skills:   ~/.config/opencode/skills -> <repo>/skills"
+      echo "                   ~/.agents/skills          -> <repo>/skills"
+      echo "                   ~/.claude/skills          -> <repo>/skills"
+      echo "  Global commands: ~/.config/opencode/commands -> <repo>/commands"
       echo "  Project-local:   .opencode/skills|commands -> ../skills|../commands (portable fallback)"
       echo "Moves existing files into the repo before linking; idempotent."
       exit 0

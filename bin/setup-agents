@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# setup-agents: general one-time setup for ~/git/agents.
-# Ensures ~/git/agents/bin is on PATH (persisted in dotfiles) and wires opencode discovery.
+# setup-agents: general one-time setup for this repo.
+# Ensures bin/ is on PATH for this shell and wires opencode discovery.
 # Idempotent; safe to re-run. Delegates opencode wiring to setup-opencode.
 # Usage: setup-agents [--dry-run] [--help]
 set -u
@@ -10,8 +10,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)
       echo "Usage: setup-agents [--dry-run]"
-      echo "General setup for ~/git/agents:"
-      echo "  1. Ensures ~/git/agents/bin on PATH (current shell + ~/git/dotfiles/zshrc)"
+      echo "General setup for <repo> (this repo):"
+      echo "  1. Ensures <repo>/bin on PATH for this shell"
       echo "  2. Calls setup-opencode for global skills/commands symlinks"
       exit 0
       ;;
@@ -28,8 +28,6 @@ done
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 BIN="$ROOT/bin"
-ZSHRC="$HOME/git/dotfiles/zshrc"
-LINE='export PATH="$HOME/git/agents/bin:$PATH"'
 
 log() { echo "[setup-agents] $*"; }
 
@@ -43,33 +41,10 @@ else
   else
     echo "  (dry-run) export PATH=\"$BIN:\$PATH\""
   fi
+  log "note: add 'export PATH=\"\$PWD/bin:\$PATH\"' (or absolute <repo>/bin) to your shell rc for persistence"
 fi
 
-# 2. Persist in dotfiles (zshrc is primary on macOS; keep bashrc/profile as fallback note)
-if [[ -f "$ZSHRC" ]]; then
-  if grep -Fq "$LINE" "$ZSHRC"; then
-    log "ok $ZSHRC already has agents PATH"
-  else
-    log "append agents PATH to $ZSHRC"
-    if [[ -z "${DRY:-}" ]]; then
-      # Preserve trailing newline, ensure idempotent append
-      printf "\n%s\n" "$LINE" >> "$ZSHRC"
-    else
-      echo "  (dry-run) echo '$LINE' >> $ZSHRC"
-    fi
-  fi
-else
-  log "WARN $ZSHRC not found (dotfiles not cloned?) — skipping persistent PATH; add manually: $LINE"
-fi
-
-# Also ensure legacy fallbacks have the line if they exist and are used
-for rc in "$HOME/git/dotfiles/profile" "$HOME/git/dotfiles/bashrc"; do
-  if [[ -f "$rc" ]] && ! grep -Fq "$LINE" "$rc"; then
-    log "note: $rc exists but lacks agents PATH — leaving as-is (zshrc is primary)"
-  fi
-done
-
-# 3. Wire opencode discovery via setup-opencode
+# 2. Wire opencode discovery via setup-opencode
 SETUP_OPENCODE="$BIN/setup-opencode"
 if [[ -x "$SETUP_OPENCODE" ]]; then
   log "delegate to setup-opencode"
@@ -82,4 +57,4 @@ else
   log "WARN $SETUP_OPENCODE not found/executable"
 fi
 
-log "done — restart shell or run: source $ZSHRC (or reopen opencode)"
+log "done — restart opencode to pick up new skills/commands"

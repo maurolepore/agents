@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # update-tidy-agents: restore token-cheap command routing after usethis::use_tidy_agents().
 # Rewrites the Key commands section of <pkgdir>/AGENTS.md with the canonical block
-# (wrappers in ~/git/agents/bin). Idempotent: exits quietly when already patched.
+# (wrappers in <repo>/bin). Idempotent: exits quietly when already patched.
 # Aborts if the section lacks known anchors (template drifted -- inspect by hand).
 # Also ensures the durability pointer in the preserved "This package" section.
 # Usage: update-tidy-agents [pkgdir]
@@ -32,7 +32,7 @@ CANONICAL = """### Key commands
 <!-- update-tidy-agents: managed block, do not edit by hand -->
 
 Shell wrappers (`rtest`, `rcoverage`, `rcmd-check`) print
-summaries only; full output goes to log files. Requires `~/git/agents/bin` on PATH.
+summaries only; full output goes to log files. Requires `bin/` on PATH.
 When a wrapper reports success, stop here --
 never cat, tail, or read the full log. Drill in only on failure.
 
