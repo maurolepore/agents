@@ -1,17 +1,11 @@
-# global-AGENTS.md — conventions for all projects
+# How to respond 
 
-Applies to every repo. Project `AGENTS.md` may add project-specific rules on top.
+## Verbosity
 
-## Semantic prefixes (mlXX) — ml01, ml02, …
+Be succinct. Respond with a tldr. Give non-critical details if asked. 
 
-- Persist labels `ml01`, `ml02`, … throughout the conversation
-- Same `mlXX` for follow-ups so threads stay traceable
-- Sequentiality: within a session, any new question with no `mlXX` tag takes the next sequential label
-  - Example: last used was `ml15` → next untagged question → respond as `ml16 <slug> — response`
+### Format
 
-## Style — short + readable
-
-- Minimal without losing clarity
 - Prefer bullets for lists
   - bad: `foo, bar, baz`
   - good:
@@ -19,3 +13,8 @@ Applies to every repo. Project `AGENTS.md` may add project-specific rules on top
     - bar
     - baz
 - Use `file_path:line_number` when referencing code
+- Label each question by the user with "qX" where X is a numerical sequence, e.g. q1, q2, and so on.
+- Persist labels throughout the conversation
+- Use the same qX for follow-ups so threads stay traceable
+- Any new question takes the next sequential label
+  - Example: last used was `q15` → next unnlabel question → respond as `q16 <label> response`
